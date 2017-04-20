@@ -42,30 +42,8 @@ fn main() {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
 
-
     let internal_addr = "127.0.0.1:4000";
     let internal_addr = internal_addr.parse::<SocketAddr>().expect("Failed to parse addr");
-
-    if let Some(id) = matches.value_of("worker") {
-        println!("I am worker {}", id);
-        worker::subscribe(internal_addr, handle);
-    } else {
-        workers::start_workers(5);
-        master::publish(internal_addr, handle);
-    }
-
-    //let timer = Timer::default();
-
-    //let timer = timer.interval(Duration::from_secs(5)).map_err(|_| ());
-    //let wrk = timer.for_each(|_| {
-    //    println!("tick");
-    //    Ok(())
-    //});
-    //core.run(wrk).unwrap();
-
-    //let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
-    let addr = "127.0.0.1:8080".to_string();
-    let addr = addr.parse::<SocketAddr>().unwrap();
 
     //let backend = env::args().nth(2).unwrap_or("http://127.0.0.1:12345".to_string());
     let backend = "http://127.0.0.1:12345";
@@ -76,15 +54,21 @@ fn main() {
     let pool = Pool::default();
     let _ = pool.add(server);
 
-    //let admin_ip = env::args().nth(3).unwrap_or("127.0.0.1:8687".to_string());
-    let admin_ip = "127.0.0.1:8687";
-    let admin_addr = admin_ip.parse::<SocketAddr>().unwrap();
+    if let Some(id) = matches.value_of("worker") {
+        println!("I am worker {}", id);
+        worker::subscribe(internal_addr, handle);
 
-    //let p = pool.clone();
-    //let _ = thread::Builder::new().name("health-check".to_string()).spawn(move || {
-    //    let checker = health::HealthCheck::new(Duration::from_millis(1000), p, "/".to_owned());
-    //    checker.run();
-    //}).expect("Failed to create proxy thread");
+        //let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
+        let addr = "127.0.0.1:8080".to_string();
+        let addr = addr.parse::<SocketAddr>().unwrap();
+        weldr::proxy::run(addr, pool, core).expect("Failed to start server");
+    } else {
+        workers::start_workers(5);
+        master::publish(internal_addr, handle);
 
-    weldr::proxy::run(addr, admin_addr, pool, core).expect("Failed to start server");
+        //let admin_ip = env::args().nth(3).unwrap_or("127.0.0.1:8687".to_string());
+        let admin_ip = "127.0.0.1:8687";
+        let admin_addr = admin_ip.parse::<SocketAddr>().unwrap();
+        weldr::mgmt::run(admin_addr, pool, core).expect("Failed to start server");
+    }
 }

@@ -4,6 +4,7 @@ use std::str;
 use std::time::Duration;
 
 use net2::TcpBuilder;
+use net2::unix::UnixTcpBuilderExt;
 use futures::{future, Future, Stream};
 use tokio_core::reactor::{Core, Handle};
 use tokio_core::net::{TcpListener, TcpStream};
@@ -17,9 +18,9 @@ use hyper_tls::HttpsConnector;
 use hyper::{Url, Uri};
 
 use pool::Pool;
-use mgmt::Mgmt;
+use mgmt::api::Mgmt;
 use stream::{merge3, Merged3Item};
-use health;
+use mgmt::health;
 
 // testing here before sending PR upstream
 // TODO make this typed
@@ -230,76 +231,31 @@ impl Service for Proxy {
 }
 
 /// Run server with default Core
-pub fn run(proxy_addr: SocketAddr, admin_addr: SocketAddr, pool: Pool, core: Core) -> io::Result<()> {
+pub fn run(addr: SocketAddr, pool: Pool, core: Core) -> io::Result<()> {
     let handle = core.handle();
 
     let listener = TcpBuilder::new_v4()?;
     listener.reuse_address(true)?;
-    let listener = listener.to_tcp_listener()?;
-    let listener = TcpListener::from_listener(listener, &proxy_addr, &handle)?;
+    listener.reuse_port(true)?;
+    let listener = listener.bind(&addr)?;
+    let listener = listener.listen(128)?;
+    let listener = TcpListener::from_listener(listener, &addr, &handle)?;
 
-    let admin_listener = TcpBuilder::new_v4()?;
-    admin_listener.reuse_address(true)?;
-    let admin_listener = admin_listener.to_tcp_listener()?;
-    let admin_listener = TcpListener::from_listener(admin_listener, &admin_addr, &handle)?;
-    run_with(core, listener, admin_listener, pool, future::empty())
+    run_with(core, listener, pool, future::empty())
 }
 
 /// Run server with specified Core, TcpListener, Pool
 ///
 /// This is useful for integration testing where the port is set to 0 and the test code needs to
 /// determine the local addr.
-pub fn run_with<F>(mut core: Core, listener: TcpListener, admin_listener: TcpListener, pool: Pool, shutdown_signal: F) -> io::Result<()>
+pub fn run_with<F>(mut core: Core, listener: TcpListener, pool: Pool, shutdown_signal: F) -> io::Result<()>
     where F: Future<Item = (), Error = hyper::Error>,
 {
     let handle = core.handle();
 
-    let timer = Timer::default();
-
-    // FIXME configure health check timer
-    let health_timer = timer.interval(Duration::from_secs(5)).map_err(|e| {
-        io::Error::new(io::ErrorKind::Other, e)
-    });
-
     let local_addr = listener.local_addr()?;
-    let listener = merge3(listener.incoming(), admin_listener.incoming(), health_timer);
-    let srv = listener.for_each(move |stream| {
-
-        // first stream is the proxy ip
-        // second stream is the management ip
-        // third stream is health interval
-        match stream {
-            Merged3Item::First((socket, addr)) => {
-                proxy(socket, addr, pool.clone(), &handle);
-            }
-            Merged3Item::Second((socket, addr)) => {
-                mgmt(socket, addr, pool.clone(), &handle);
-            }
-            Merged3Item::Third(()) => {
-                info!("health check");
-                health::run(pool.clone(), &handle);
-            }
-            Merged3Item::FirstSecond((socket, addr), (socket2, addr2)) => {
-                proxy(socket, addr, pool.clone(), &handle);
-                mgmt(socket2, addr2, pool.clone(), &handle);
-            }
-            Merged3Item::SecondThird((socket, addr), ()) => {
-                mgmt(socket, addr, pool.clone(), &handle);
-                info!("health check");
-                health::run(pool.clone(), &handle);
-            }
-            Merged3Item::FirstThird((socket, addr), ()) => {
-                proxy(socket, addr, pool.clone(), &handle);
-                info!("health check");
-                health::run(pool.clone(), &handle);
-            }
-            Merged3Item::All((socket, addr), (socket2, addr2), ()) => {
-                proxy(socket, addr, pool.clone(), &handle);
-                mgmt(socket2, addr2, pool.clone(), &handle);
-                info!("health check");
-                health::run(pool.clone(), &handle);
-            }
-        }
+    let srv = listener.incoming().for_each(move |(socket, addr)| {
+        proxy(socket, addr, pool.clone(), &handle);
 
         Ok(())
     });
@@ -320,12 +276,6 @@ fn proxy(socket: TcpStream, addr: SocketAddr, pool: Pool, handle: &Handle) {
         pool: pool,
     };
 
-    let http = Http::new();
-    http.bind_connection(&handle, socket, addr, service);
-}
-
-fn mgmt(socket: TcpStream, addr: SocketAddr, pool: Pool, handle: &Handle) {
-    let service = Mgmt::new(pool, handle.clone());
     let http = Http::new();
     http.bind_connection(&handle, socket, addr, service);
 }

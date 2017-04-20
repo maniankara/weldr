@@ -22,7 +22,6 @@ pub mod server;
 pub mod pool;
 pub mod proxy;
 pub mod mgmt;
-pub mod health;
 pub mod stats;
 pub mod stream;
 pub mod workers;
