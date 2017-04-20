@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::str;
 use std::time::Duration;
 
+use net2::TcpBuilder;
 use futures::{future, Future, Stream};
 use tokio_core::reactor::{Core, Handle};
 use tokio_core::net::{TcpListener, TcpStream};
@@ -229,12 +230,18 @@ impl Service for Proxy {
 }
 
 /// Run server with default Core
-pub fn run(proxy_addr: SocketAddr, admin_addr: SocketAddr, pool: Pool) -> io::Result<()> {
-    let core = Core::new()?;
+pub fn run(proxy_addr: SocketAddr, admin_addr: SocketAddr, pool: Pool, core: Core) -> io::Result<()> {
     let handle = core.handle();
 
-    let listener = TcpListener::bind(&proxy_addr, &handle)?;
-    let admin_listener = TcpListener::bind(&admin_addr, &handle)?;
+    let listener = TcpBuilder::new_v4()?;
+    listener.reuse_address(true)?;
+    let listener = listener.to_tcp_listener()?;
+    let listener = TcpListener::from_listener(listener, &proxy_addr, &handle)?;
+
+    let admin_listener = TcpBuilder::new_v4()?;
+    admin_listener.reuse_address(true)?;
+    let admin_listener = admin_listener.to_tcp_listener()?;
+    let admin_listener = TcpListener::from_listener(admin_listener, &admin_addr, &handle)?;
     run_with(core, listener, admin_listener, pool, future::empty())
 }
 
