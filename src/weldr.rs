@@ -56,7 +56,7 @@ fn main() {
 
     if let Some(id) = matches.value_of("worker") {
         println!("I am worker {}", id);
-        worker::subscribe(internal_addr, handle);
+        let _result = worker::subscribe(internal_addr, handle);
 
         //let addr = env::args().nth(1).unwrap_or("127.0.0.1:8080".to_string());
         let addr = "127.0.0.1:8080".to_string();

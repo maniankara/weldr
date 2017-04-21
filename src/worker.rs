@@ -1,16 +1,17 @@
 use std::net::SocketAddr;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 use weldr_capnp::{publisher, subscriber};
 
 use futures::Future;
 
 use capnp_rpc::{RpcSystem, twoparty, rpc_twoparty_capnp};
-use capnp::capability::Promise;
+use capnp::capability::{Response, Promise};
 
 use tokio_io::AsyncRead;
 use tokio_core::reactor::Handle;
 use tokio_core::net::TcpStream;
-
 
 struct SubscriberImpl;
 
@@ -25,8 +26,16 @@ impl subscriber::Server<::capnp::text::Owned> for SubscriberImpl {
         }
 }
 
-pub fn subscribe(addr: SocketAddr, handle: Handle) {
+pub struct S {
+    pub response: Option<Response<publisher::subscribe_results::Owned<::capnp::text::Owned>>>,
+}
+
+pub fn subscribe(addr: SocketAddr, handle: Handle) -> Rc<RefCell<S>> {
     let handle1 = handle.clone();
+
+    let s = S { response: None };
+    let s = Rc::new(RefCell::new(s));
+    let s1 = s.clone();
 
     let request = TcpStream::connect(&addr, &handle).map_err(|e| e.into()).and_then(move |stream| {
         stream.set_nodelay(true).unwrap();
@@ -52,10 +61,13 @@ pub fn subscribe(addr: SocketAddr, handle: Handle) {
         request.send().promise
     }).map_err(|e| {
         error!("Subscribe request error {:?}", e);
-    }).and_then(|_| {
+    }).and_then(move |r| {
         info!("Got a subscribe response");
+        s1.borrow_mut().response = Some(r);
         ::futures::finished(())
     });
 
     handle.spawn(request);
+
+    s
 }
