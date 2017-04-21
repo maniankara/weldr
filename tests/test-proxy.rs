@@ -132,7 +132,6 @@ fn with_server<R> (req: R) where R: Fn(String, Handle) -> Box<Future<Item=(), Er
     weldr::proxy::run_with(
         core,
         listener,
-        admin_listener,
         pool.clone(),
         shutdown_signal).expect("Failed to start server");
 }
