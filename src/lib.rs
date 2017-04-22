@@ -25,5 +25,3 @@ pub mod mgmt;
 pub mod stats;
 pub mod stream;
 pub mod workers;
-pub mod worker;
-pub mod master;

@@ -23,7 +23,7 @@ struct SubscriberHandle {
     requests_in_flight: i32,
 }
 
-struct SubscriberMap {
+pub struct SubscriberMap {
     subscribers: HashMap<u64, SubscriberHandle>,
 }
 
@@ -62,7 +62,11 @@ impl PublisherImpl {
     pub fn new() -> (PublisherImpl, Rc<RefCell<SubscriberMap>>) {
         let subscribers = Rc::new(RefCell::new(SubscriberMap::new()));
         (PublisherImpl { next_id: 0, subscribers: subscribers.clone() },
-         subscribers.clone())
+        subscribers.clone())
+    }
+
+    pub fn get_subscribers(&self) -> Rc<RefCell<SubscriberMap>> {
+        self.subscribers.clone()
     }
 }
 
@@ -90,7 +94,7 @@ impl publisher::Server<::capnp::data::Owned> for PublisherImpl {
     }
 }
 
-pub fn publish(addr: SocketAddr, handle: Handle) {
+pub fn listen(addr: SocketAddr, handle: Handle) {
     let socket = ::tokio_core::net::TcpListener::bind(&addr, &handle).unwrap();
 
     let (publisher_impl, subscribers) = PublisherImpl::new();
@@ -114,11 +118,14 @@ pub fn publish(addr: SocketAddr, handle: Handle) {
     }).map_err(|_| ());
 
     handle.spawn(done);
+}
+
+pub fn publish_new_server(addr: SocketAddr, handle: Handle, subscribers: Rc<RefCell<SubscriberMap>>) {
 
     let mut message = Builder::new_default();
     {
         let mut request = message.init_root::<add_backend_server_request::Builder>();
-        request.set_addr("127.0.0.1:8080");
+        request.set_addr(&format!("{}", addr));
     }
 
     let mut buf = Vec::new();

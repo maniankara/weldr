@@ -15,6 +15,8 @@ use self::api::Mgmt;
 
 pub mod api;
 pub mod health;
+pub mod manager;
+pub mod worker;
 
 /// Run server with default Core
 pub fn run(admin_addr: SocketAddr, pool: Pool, core: Core) -> io::Result<()> {

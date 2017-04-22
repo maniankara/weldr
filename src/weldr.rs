@@ -25,8 +25,7 @@ use weldr::server::Server;
 use weldr::pool::Pool;
 //use weldr::health;
 use weldr::workers;
-use weldr::worker;
-use weldr::master;
+use weldr::mgmt::{worker, manager};
 
 fn main() {
     env_logger::init().expect("Failed to start logger");
@@ -64,7 +63,7 @@ fn main() {
         weldr::proxy::run(addr, pool, core).expect("Failed to start server");
     } else {
         workers::start_workers(5);
-        master::publish(internal_addr, handle);
+        manager::listen(internal_addr, handle);
 
         //let admin_ip = env::args().nth(3).unwrap_or("127.0.0.1:8687".to_string());
         let admin_ip = "127.0.0.1:8687";
