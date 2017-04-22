@@ -9,7 +9,7 @@ use futures::Future;
 use capnp_rpc::{RpcSystem, twoparty, rpc_twoparty_capnp};
 use capnp::capability::{Response, Promise};
 use capnp::serialize;
-use capnp::message::{Reader, ReaderOptions};
+use capnp::message::ReaderOptions;
 
 use tokio_io::AsyncRead;
 use tokio_core::reactor::Handle;
@@ -28,7 +28,7 @@ impl subscriber::Server<::capnp::data::Owned> for SubscriberImpl {
 
             let reader = serialize::read_message(&mut buf, ReaderOptions::new()).unwrap();
             let message = reader.get_root::<add_backend_server_request::Reader>().unwrap();
-            info!("message from publisher: {:?}", message.get_addr());
+            info!("url from manager: {:?}", message.get_url());
             Promise::ok(())
         }
 }

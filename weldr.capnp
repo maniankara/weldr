@@ -19,6 +19,6 @@ interface Subscriber(T) {
 struct AddBackendServerRequest {
   # A request from the manager to the workers to add a new backend server to the pool
 
-   addr @0 :Text;
-   # The address of the new server to add to the pool
+   url @0 :Text;
+   # The url of the new server to add to the pool
 }

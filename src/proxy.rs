@@ -1,14 +1,12 @@
 use std::io;
 use std::net::SocketAddr;
 use std::str;
-use std::time::Duration;
 
 use net2::TcpBuilder;
 use net2::unix::UnixTcpBuilderExt;
 use futures::{future, Future, Stream};
 use tokio_core::reactor::{Core, Handle};
 use tokio_core::net::{TcpListener, TcpStream};
-use tokio_timer::Timer;
 use hyper::{self, Headers, Client, HttpVersion};
 use hyper::client;
 use hyper::client::Service;
@@ -18,9 +16,6 @@ use hyper_tls::HttpsConnector;
 use hyper::{Url, Uri};
 
 use pool::Pool;
-use mgmt::api::Mgmt;
-use stream::{merge3, Merged3Item};
-use mgmt::health;
 
 // testing here before sending PR upstream
 // TODO make this typed

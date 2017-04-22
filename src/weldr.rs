@@ -2,24 +2,15 @@ extern crate env_logger;
 extern crate hyper;
 extern crate weldr;
 extern crate clap;
-extern crate nix;
 extern crate tokio_core;
-extern crate futures;
-extern crate tokio_timer;
 
 use std::env;
-use std::io::{Read, Write};
 use std::net::SocketAddr;
-use std::time::Duration;
-
-use futures::{Future, Stream};
 
 use hyper::Url;
 use clap::{Arg, App};
-use nix::sys::wait::{wait};
 
 use tokio_core::reactor::Core;
-use tokio_timer::Timer;
 
 use weldr::server::Server;
 use weldr::pool::Pool;
@@ -37,7 +28,7 @@ fn main() {
         .get_matches();
 
 
-    let mut core = Core::new().unwrap();
+    let core = Core::new().unwrap();
     let handle = core.handle();
 
     let internal_addr = "127.0.0.1:4000";
@@ -61,8 +52,11 @@ fn main() {
         let addr = addr.parse::<SocketAddr>().unwrap();
         weldr::proxy::run(addr, pool, core).expect("Failed to start server");
     } else {
-        let manager = manager::Manager::start_workers(5);
-        manager::listen(internal_addr, handle);
+        let manager = manager::Manager::start_workers(5).expect("Failed to start manager");
+        manager.listen(internal_addr, handle.clone());
+        let backend = "http://127.0.0.1:12345";
+        let backend = backend.parse::<Url>().unwrap();
+        manager.publish_new_server(backend, handle);
 
         //let admin_ip = env::args().nth(3).unwrap_or("127.0.0.1:8687".to_string());
         let admin_ip = "127.0.0.1:8687";

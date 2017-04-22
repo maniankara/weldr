@@ -1,11 +1,20 @@
+//! Managers the underlying worker pool
+//!
+//! The manager publishes messages to the workers. Currently, the pubsub system uses capnp RPC
+//! functionality. The pubsub implementation is subject to change, so the implementation is
+//! hidden from the rest of the system.
+
 use std::net::SocketAddr;
 use std::io;
 use std::process::Command;
 use std::os::unix::process::CommandExt;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use libc::pid_t;
 use nix::unistd::{fork, ForkResult};
 use tokio_core::reactor::Handle;
+use hyper::Url;
 
 pub struct Worker {
     id: u64,
@@ -14,6 +23,7 @@ pub struct Worker {
 
 pub struct Manager {
     workers: Vec<Worker>,
+    subscribers: Rc<RefCell<capnp::SubscriberMap>>
 }
 
 impl Manager {
@@ -22,9 +32,25 @@ impl Manager {
             start_worker(id)
         }).collect::<io::Result<Vec<Worker>>>().and_then(|workers| {
             Ok(Manager {
-                workers: workers
+                workers: workers,
+                subscribers: Rc::new(RefCell::new(capnp::SubscriberMap::new())),
             })
         })
+    }
+
+    /// Listen for workers requesting to subscribe
+    ///
+    /// This works using a handle instead of running on the main core. This was done to allow the
+    /// manager to perform other essential functions using the main core.
+    pub fn listen(&self, addr: SocketAddr, handle: Handle) {
+
+        // TODO should the publisher should check against the worker list?
+        capnp::listen(addr, handle, self.subscribers.clone())
+    }
+
+    /// Ask all workers to add a new server to their pool
+    pub fn publish_new_server(&self, url: Url, handle: Handle) {
+        capnp::publish_new_server(url, handle, self.subscribers.clone())
     }
 }
 
@@ -58,16 +84,6 @@ fn weldr_path() -> String {
     "/Users/herman/projects/weldr/target/debug/weldr".to_owned()
 }
 
-/// Listen for workers requesting to subscribe
-///
-/// This works using a handle instead of running on the main core. This was done to allow the
-/// manager to perform other essential functions using the main core.
-pub fn listen(addr: SocketAddr, handle: Handle) {
-
-    // TODO should the publisher should check against the worker list?
-    capnp::listen(addr, handle)
-}
-
 mod capnp {
     use std::cell::RefCell;
     use std::collections::HashMap;
@@ -82,12 +98,14 @@ mod capnp {
     use capnp_rpc::{RpcSystem, twoparty, rpc_twoparty_capnp};
     use capnp::capability::Promise;
     use capnp::Error;
-    use capnp::message::{Builder, HeapAllocator};
+    use capnp::message::Builder;
     use capnp::serialize;
 
     use tokio_io::AsyncRead;
     use tokio_core::reactor::Handle;
     use tokio_timer::Timer;
+
+    use hyper::Url;
 
     struct SubscriberHandle {
         client: subscriber::Client<::capnp::data::Owned>,
@@ -99,7 +117,7 @@ mod capnp {
     }
 
     impl SubscriberMap {
-        fn new() -> SubscriberMap {
+        pub fn new() -> SubscriberMap {
             SubscriberMap { subscribers: HashMap::new() }
         }
     }
@@ -124,20 +142,14 @@ mod capnp {
 
     impl subscription::Server for SubscriptionImpl {}
 
-    struct PublisherImpl {
+    pub struct PublisherImpl {
         next_id: u64,
         subscribers: Rc<RefCell<SubscriberMap>>,
     }
 
     impl PublisherImpl {
-        pub fn new() -> (PublisherImpl, Rc<RefCell<SubscriberMap>>) {
-            let subscribers = Rc::new(RefCell::new(SubscriberMap::new()));
-            (PublisherImpl { next_id: 0, subscribers: subscribers.clone() },
-            subscribers.clone())
-        }
-
-        pub fn get_subscribers(&self) -> Rc<RefCell<SubscriberMap>> {
-            self.subscribers.clone()
+        pub fn new(subscribers: Rc<RefCell<SubscriberMap>>) -> PublisherImpl {
+            PublisherImpl { next_id: 0, subscribers: subscribers }
         }
     }
 
@@ -154,7 +166,7 @@ mod capnp {
                         client: pry!(pry!(params.get()).get_subscriber()),
                         requests_in_flight: 0,
                     }
-                    );
+                );
 
                 results.get().set_subscription(
                     subscription::ToClient::new(SubscriptionImpl::new(self.next_id, self.subscribers.clone()))
@@ -165,10 +177,10 @@ mod capnp {
             }
     }
 
-    pub fn listen(addr: SocketAddr, handle: Handle) {
+    pub fn listen(addr: SocketAddr, handle: Handle, subscribers: Rc<RefCell<SubscriberMap>>) {
         let socket = ::tokio_core::net::TcpListener::bind(&addr, &handle).unwrap();
 
-        let (publisher_impl, subscribers) = PublisherImpl::new();
+        let publisher_impl = PublisherImpl::new(subscribers);
 
         let publisher = publisher::ToClient::new(publisher_impl).from_server::<::capnp_rpc::Server>();
 
@@ -191,12 +203,12 @@ mod capnp {
         handle.spawn(done);
     }
 
-    pub fn publish_new_server(addr: SocketAddr, handle: Handle, subscribers: Rc<RefCell<SubscriberMap>>) {
+    pub fn publish_new_server(url: Url, handle: Handle, subscribers: Rc<RefCell<SubscriberMap>>) {
 
         let mut message = Builder::new_default();
         {
             let mut request = message.init_root::<add_backend_server_request::Builder>();
-            request.set_addr(&format!("{}", addr));
+            request.set_url(&format!("{}", url));
         }
 
         let mut buf = Vec::new();
@@ -216,10 +228,8 @@ mod capnp {
                     subscriber.requests_in_flight += 1;
 
                     let mut request = subscriber.client.push_message_request();
-                    //request.get().set_message(
-                    //    &format!("system time is: {:?}", ::std::time::SystemTime::now())[..]).unwrap();
 
-                    request.get().set_message(&buf[..]);
+                    request.get().set_message(&buf[..]).unwrap();
 
                     let subscribers2 = subscribers1.clone();
                     handle2.spawn(request.send().promise.then(move |r| {
