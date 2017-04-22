@@ -2,12 +2,14 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use weldr_capnp::{publisher, subscriber};
+use weldr_capnp::{publisher, subscriber, add_backend_server_request};
 
 use futures::Future;
 
 use capnp_rpc::{RpcSystem, twoparty, rpc_twoparty_capnp};
 use capnp::capability::{Response, Promise};
+use capnp::serialize;
+use capnp::message::{Reader, ReaderOptions};
 
 use tokio_io::AsyncRead;
 use tokio_core::reactor::Handle;
@@ -15,19 +17,24 @@ use tokio_core::net::TcpStream;
 
 struct SubscriberImpl;
 
-impl subscriber::Server<::capnp::text::Owned> for SubscriberImpl {
+impl subscriber::Server<::capnp::data::Owned> for SubscriberImpl {
     fn push_message(&mut self,
-                    params: subscriber::PushMessageParams<::capnp::text::Owned>,
-                    _results: subscriber::PushMessageResults<::capnp::text::Owned>)
+                    params: subscriber::PushMessageParams<::capnp::data::Owned>,
+                    _results: subscriber::PushMessageResults<::capnp::data::Owned>)
         -> Promise<(), ::capnp::Error>
         {
-            info!("message from publisher: {}", pry!(pry!(params.get()).get_message()));
+            let mut buf = pry!(pry!(params.get()).get_message());
+            info!("raw message from publisher: {:?}", buf);
+
+            let reader = serialize::read_message(&mut buf, ReaderOptions::new()).unwrap();
+            let message = reader.get_root::<add_backend_server_request::Reader>().unwrap();
+            info!("message from publisher: {:?}", message.get_addr());
             Promise::ok(())
         }
 }
 
 pub struct S {
-    pub response: Option<Response<publisher::subscribe_results::Owned<::capnp::text::Owned>>>,
+    pub response: Option<Response<publisher::subscribe_results::Owned<::capnp::data::Owned>>>,
 }
 
 pub fn subscribe(addr: SocketAddr, handle: Handle) -> Rc<RefCell<S>> {
@@ -47,7 +54,7 @@ pub fn subscribe(addr: SocketAddr, handle: Handle) -> Rc<RefCell<S>> {
                                                Default::default()));
 
         let mut rpc_system = RpcSystem::new(rpc_network, None);
-        let publisher: publisher::Client<::capnp::text::Owned> =
+        let publisher: publisher::Client<::capnp::data::Owned> =
             rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
         let sub = subscriber::ToClient::new(SubscriberImpl).from_server::<::capnp_rpc::Server>();

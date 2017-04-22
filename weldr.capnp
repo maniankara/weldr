@@ -15,3 +15,10 @@ interface Subscriber(T) {
     # Sends a message from a publisher to the subscriber. To help with flow control, the subscriber should not
     # return from this method until it is ready to process the next message.
 }
+
+struct AddBackendServerRequest {
+  # A request from the manager to the workers to add a new backend server to the pool
+
+   addr @0 :Text;
+   # The address of the new server to add to the pool
+}

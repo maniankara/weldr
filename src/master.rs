@@ -4,20 +4,22 @@ use std::net::SocketAddr;
 use std::rc::Rc;
 use std::time::Duration;
 
-use weldr_capnp::{publisher, subscriber, subscription};
+use weldr_capnp::{publisher, subscriber, subscription, add_backend_server_request};
 
 use futures::{Future, Stream};
 
 use capnp_rpc::{RpcSystem, twoparty, rpc_twoparty_capnp};
 use capnp::capability::Promise;
 use capnp::Error;
+use capnp::message::{Builder, HeapAllocator};
+use capnp::serialize;
 
 use tokio_io::AsyncRead;
 use tokio_core::reactor::Handle;
 use tokio_timer::Timer;
 
 struct SubscriberHandle {
-    client: subscriber::Client<::capnp::text::Owned>,
+    client: subscriber::Client<::capnp::data::Owned>,
     requests_in_flight: i32,
 }
 
@@ -64,10 +66,10 @@ impl PublisherImpl {
     }
 }
 
-impl publisher::Server<::capnp::text::Owned> for PublisherImpl {
+impl publisher::Server<::capnp::data::Owned> for PublisherImpl {
     fn subscribe(&mut self,
-                 params: publisher::SubscribeParams<::capnp::text::Owned>,
-                 mut results: publisher::SubscribeResults<::capnp::text::Owned>,)
+                 params: publisher::SubscribeParams<::capnp::data::Owned>,
+                 mut results: publisher::SubscribeResults<::capnp::data::Owned>,)
                  -> Promise<(), ::capnp::Error>
     {
         info!("subscribe");
@@ -113,6 +115,15 @@ pub fn publish(addr: SocketAddr, handle: Handle) {
 
     handle.spawn(done);
 
+    let mut message = Builder::new_default();
+    {
+        let mut request = message.init_root::<add_backend_server_request::Builder>();
+        request.set_addr("127.0.0.1:8080");
+    }
+
+    let mut buf = Vec::new();
+    serialize::write_message(&mut buf, &message).unwrap();
+
     let timer = Timer::default();
 
     let handle2 = handle.clone();
@@ -127,8 +138,10 @@ pub fn publish(addr: SocketAddr, handle: Handle) {
                 subscriber.requests_in_flight += 1;
 
                 let mut request = subscriber.client.push_message_request();
-                request.get().set_message(
-                    &format!("system time is: {:?}", ::std::time::SystemTime::now())[..]).unwrap();
+                //request.get().set_message(
+                //    &format!("system time is: {:?}", ::std::time::SystemTime::now())[..]).unwrap();
+
+                request.get().set_message(&buf[..]);
 
                 let subscribers2 = subscribers1.clone();
                 handle2.spawn(request.send().promise.then(move |r| {
