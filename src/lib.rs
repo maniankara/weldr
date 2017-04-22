@@ -24,4 +24,3 @@ pub mod proxy;
 pub mod mgmt;
 pub mod stats;
 pub mod stream;
-pub mod workers;

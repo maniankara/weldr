@@ -24,7 +24,6 @@ use tokio_timer::Timer;
 use weldr::server::Server;
 use weldr::pool::Pool;
 //use weldr::health;
-use weldr::workers;
 use weldr::mgmt::{worker, manager};
 
 fn main() {
@@ -62,7 +61,7 @@ fn main() {
         let addr = addr.parse::<SocketAddr>().unwrap();
         weldr::proxy::run(addr, pool, core).expect("Failed to start server");
     } else {
-        workers::start_workers(5);
+        let manager = manager::Manager::start_workers(5);
         manager::listen(internal_addr, handle);
 
         //let admin_ip = env::args().nth(3).unwrap_or("127.0.0.1:8687".to_string());
