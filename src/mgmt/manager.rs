@@ -89,7 +89,6 @@ mod capnp {
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::rc::Rc;
-    use std::time::Duration;
 
     use weldr_capnp::{publisher, subscriber, subscription, add_backend_server_request};
 
@@ -103,7 +102,6 @@ mod capnp {
 
     use tokio_io::AsyncRead;
     use tokio_core::reactor::Handle;
-    use tokio_timer::Timer;
 
     use hyper::Url;
 
@@ -204,6 +202,7 @@ mod capnp {
     }
 
     pub fn publish_new_server(url: Url, handle: Handle, subscribers: Rc<RefCell<SubscriberMap>>) {
+        trace!("publish_new_server");
 
         let mut message = Builder::new_default();
         {
@@ -214,44 +213,32 @@ mod capnp {
         let mut buf = Vec::new();
         serialize::write_message(&mut buf, &message).unwrap();
 
-        let timer = Timer::default();
+        let subscribers1 = subscribers.clone();
+        let subs = &mut subscribers.borrow_mut().subscribers;
+        for (&idx, mut subscriber) in subs.iter_mut() {
+            if subscriber.requests_in_flight < 5 {
+                subscriber.requests_in_flight += 1;
 
-        let handle2 = handle.clone();
-        let timer = timer.interval(Duration::from_secs(5)).map_err(|_| ());
-        let wrk = timer.for_each(move |_| {
-            info!("Sending message");
+                let mut request = subscriber.client.push_message_request();
 
-            let subscribers1 = subscribers.clone();
-            let subs = &mut subscribers.borrow_mut().subscribers;
-            for (&idx, mut subscriber) in subs.iter_mut() {
-                if subscriber.requests_in_flight < 5 {
-                    subscriber.requests_in_flight += 1;
+                request.get().set_message(&buf[..]).unwrap();
 
-                    let mut request = subscriber.client.push_message_request();
-
-                    request.get().set_message(&buf[..]).unwrap();
-
-                    let subscribers2 = subscribers1.clone();
-                    handle2.spawn(request.send().promise.then(move |r| {
-                        match r {
-                            Ok(_) => {
-                                subscribers2.borrow_mut().subscribers.get_mut(&idx).map(|ref mut s| {
-                                    s.requests_in_flight -= 1;
-                                });
-                            }
-                            Err(e) => {
-                                error!("Got error: {:?}. Dropping subscriber.", e);
-                                subscribers2.borrow_mut().subscribers.remove(&idx);
-                            }
+                let subscribers2 = subscribers1.clone();
+                handle.spawn(request.send().promise.then(move |r| {
+                    match r {
+                        Ok(_) => {
+                            subscribers2.borrow_mut().subscribers.get_mut(&idx).map(|ref mut s| {
+                                s.requests_in_flight -= 1;
+                            });
                         }
-                        Ok::<(), Error>(())
-                    }).map_err(|_| unreachable!()));
-                }
+                        Err(e) => {
+                            error!("Got error: {:?}. Dropping subscriber.", e);
+                            subscribers2.borrow_mut().subscribers.remove(&idx);
+                        }
+                    }
+                    Ok::<(), Error>(())
+                }).map_err(|_| unreachable!()));
             }
-
-            Ok(())
-        });
-
-        handle.spawn(wrk);
+        }
     }
 }
