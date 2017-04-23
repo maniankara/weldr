@@ -4,15 +4,12 @@ extern crate weldr;
 extern crate clap;
 extern crate tokio_core;
 
-use std::env;
 use std::net::SocketAddr;
 
-use hyper::Url;
 use clap::{Arg, App, SubCommand};
 
 use tokio_core::reactor::Core;
 
-use weldr::server::Server;
 use weldr::pool::Pool;
 use weldr::mgmt::{worker, manager};
 
