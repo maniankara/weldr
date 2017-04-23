@@ -79,12 +79,12 @@ fn start_worker(id: u64) -> io::Result<Worker> {
             trace!("I am a new child");
 
             Command::new(&path)
-                .arg("--worker")
+                .arg("worker")
+                .arg("--id")
                 .arg(id.to_string())
                 .exec();
 
             unreachable!();
-            //process::exit(0);
         }
     }
 }
