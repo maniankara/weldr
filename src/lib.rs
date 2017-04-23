@@ -1,4 +1,4 @@
-#[macro_use] extern crate futures;
+extern crate futures;
 #[macro_use] extern crate log;
 extern crate env_logger;
 #[macro_use] extern crate hyper;
@@ -23,4 +23,3 @@ pub mod pool;
 pub mod proxy;
 pub mod mgmt;
 pub mod stats;
-pub mod stream;

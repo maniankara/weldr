@@ -11,11 +11,26 @@ use capnp::capability::{Response, Promise};
 use capnp::serialize;
 use capnp::message::ReaderOptions;
 
+use hyper::Url;
+
 use tokio_io::AsyncRead;
 use tokio_core::reactor::Handle;
 use tokio_core::net::TcpStream;
 
-struct SubscriberImpl;
+use server::Server;
+use pool::Pool;
+
+struct SubscriberImpl {
+    pool: Pool,
+}
+
+impl SubscriberImpl {
+    pub fn new(pool: Pool) -> Self {
+        Self {
+            pool: pool,
+        }
+    }
+}
 
 impl subscriber::Server<::capnp::data::Owned> for SubscriberImpl {
     fn push_message(&mut self,
@@ -28,7 +43,13 @@ impl subscriber::Server<::capnp::data::Owned> for SubscriberImpl {
 
             let reader = serialize::read_message(&mut buf, ReaderOptions::new()).unwrap();
             let message = reader.get_root::<add_backend_server_request::Reader>().unwrap();
-            info!("url from manager: {:?}", message.get_url());
+            let url = message.get_url().unwrap();
+            info!("url from manager: {:?}", url);
+
+            let backend = url.parse::<Url>().expect("Failed to parse server url");
+            let backend = Server::new(backend, true);
+            self.pool.add(backend);
+
             Promise::ok(())
         }
 }
@@ -37,7 +58,7 @@ pub struct S {
     pub response: Option<Response<publisher::subscribe_results::Owned<::capnp::data::Owned>>>,
 }
 
-pub fn subscribe(addr: SocketAddr, handle: Handle) -> Rc<RefCell<S>> {
+pub fn subscribe(addr: SocketAddr, handle: Handle, pool: Pool) -> Rc<RefCell<S>> {
     let handle1 = handle.clone();
 
     let s = S { response: None };
@@ -57,7 +78,7 @@ pub fn subscribe(addr: SocketAddr, handle: Handle) -> Rc<RefCell<S>> {
         let publisher: publisher::Client<::capnp::data::Owned> =
             rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
 
-        let sub = subscriber::ToClient::new(SubscriberImpl).from_server::<::capnp_rpc::Server>();
+        let sub = subscriber::ToClient::new(SubscriberImpl::new(pool)).from_server::<::capnp_rpc::Server>();
 
         let mut request = publisher.subscribe_request();
         request.get().set_subscriber(sub);

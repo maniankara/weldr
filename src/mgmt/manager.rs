@@ -16,12 +16,19 @@ use nix::unistd::{fork, ForkResult};
 use tokio_core::reactor::Handle;
 use hyper::Url;
 
+#[derive(Debug)]
 pub struct Worker {
     id: u64,
     pid: pid_t,
 }
 
+#[derive(Clone, Debug)]
 pub struct Manager {
+    inner: Rc<RefCell<Inner>>,
+}
+
+#[derive(Debug)]
+pub struct Inner {
     workers: Vec<Worker>,
     subscribers: Rc<RefCell<capnp::SubscriberMap>>
 }
@@ -32,8 +39,10 @@ impl Manager {
             start_worker(id)
         }).collect::<io::Result<Vec<Worker>>>().and_then(|workers| {
             Ok(Manager {
-                workers: workers,
-                subscribers: Rc::new(RefCell::new(capnp::SubscriberMap::new())),
+                inner: Rc::new(RefCell::new(Inner {
+                    workers: workers,
+                    subscribers: Rc::new(RefCell::new(capnp::SubscriberMap::new())),
+                }))
             })
         })
     }
@@ -45,12 +54,12 @@ impl Manager {
     pub fn listen(&self, addr: SocketAddr, handle: Handle) {
 
         // TODO should the publisher should check against the worker list?
-        capnp::listen(addr, handle, self.subscribers.clone())
+        capnp::listen(addr, handle, self.inner.borrow().subscribers.clone())
     }
 
     /// Ask all workers to add a new server to their pool
     pub fn publish_new_server(&self, url: Url, handle: Handle) {
-        capnp::publish_new_server(url, handle, self.subscribers.clone())
+        capnp::publish_new_server(url, handle, self.inner.borrow().subscribers.clone())
     }
 }
 
@@ -89,6 +98,7 @@ mod capnp {
     use std::collections::HashMap;
     use std::net::SocketAddr;
     use std::rc::Rc;
+    use std::fmt;
 
     use weldr_capnp::{publisher, subscriber, subscription, add_backend_server_request};
 
@@ -112,6 +122,12 @@ mod capnp {
 
     pub struct SubscriberMap {
         subscribers: HashMap<u64, SubscriberHandle>,
+    }
+
+    impl fmt::Debug for SubscriberMap {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "SubscriberMap {{ subscribers: {} }}", self.subscribers.iter().count())
+        }
     }
 
     impl SubscriberMap {

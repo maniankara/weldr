@@ -12,6 +12,7 @@ use hyper::server:: Http;
 
 use pool::Pool;
 use self::api::Mgmt;
+use self::manager::Manager;
 
 pub mod api;
 pub mod health;
@@ -19,18 +20,18 @@ pub mod manager;
 pub mod worker;
 
 /// Run server with default Core
-pub fn run(admin_addr: SocketAddr, pool: Pool, core: Core) -> io::Result<()> {
+pub fn run(admin_addr: SocketAddr, pool: Pool, core: Core, manager: Manager) -> io::Result<()> {
     let handle = core.handle();
 
     let admin_listener = TcpListener::bind(&admin_addr, &handle)?;
-    run_with(core, admin_listener, pool, future::empty())
+    run_with(core, admin_listener, pool, future::empty(), manager)
 }
 
 /// Run server with specified Core, TcpListener, Pool
 ///
 /// This is useful for integration testing where the port is set to 0 and the test code needs to
 /// determine the local addr.
-pub fn run_with<F>(mut core: Core, listener: TcpListener, pool: Pool, shutdown_signal: F) -> io::Result<()>
+pub fn run_with<F>(mut core: Core, listener: TcpListener, pool: Pool, shutdown_signal: F, manager: Manager) -> io::Result<()>
     where F: Future<Item = (), Error = hyper::Error>,
 {
     let handle = core.handle();
@@ -50,13 +51,13 @@ pub fn run_with<F>(mut core: Core, listener: TcpListener, pool: Pool, shutdown_s
         // second stream is health interval
         match stream {
             MergedItem::First((socket, addr)) => {
-                mgmt(socket, addr, pool.clone(), &handle);
+                mgmt(socket, addr, pool.clone(), &handle, manager.clone());
             }
             MergedItem::Second(()) => {
                 health::run(pool.clone(), &handle);
             }
             MergedItem::Both((socket, addr), ()) => {
-                mgmt(socket, addr, pool.clone(), &handle);
+                mgmt(socket, addr, pool.clone(), &handle, manager.clone());
                 info!("health check");
                 health::run(pool.clone(), &handle);
             }
@@ -72,8 +73,8 @@ pub fn run_with<F>(mut core: Core, listener: TcpListener, pool: Pool, shutdown_s
     }
 }
 
-fn mgmt(socket: TcpStream, addr: SocketAddr, pool: Pool, handle: &Handle) {
-    let service = Mgmt::new(pool, handle.clone());
+fn mgmt(socket: TcpStream, addr: SocketAddr, pool: Pool, handle: &Handle, manager: Manager) {
+    let service = Mgmt::new(pool, handle.clone(), manager);
     let http = Http::new();
     http.bind_connection(&handle, socket, addr, service);
 }
